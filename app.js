@@ -1,15 +1,14 @@
-/* ---------- รอ DOM + VOCAB พร้อมก่อนทำงาน ---------- */
+/* ---------- รอ DOM + VOCAB พร้อม ---------- */
 document.addEventListener("DOMContentLoaded", () => {
   if (typeof VOCAB === "undefined" || !Array.isArray(VOCAB)) {
     console.error("VOCAB ไม่ถูกโหลด — ตรวจสอบ vocab.js");
     document.querySelector("main").innerHTML =
-      '<p style="color:#e05252;text-align:center;padding:40px">โหลดข้อมูลคำศัพท์ไม่สำเร็จ<br>กรุณาตรวจสอบไฟล์ vocab.js</p>';
+      '<p style="color:#e05252;text-align:center;padding:40px">โหลดข้อมูลคำศัพท์ไม่สำเร็จ</p>';
     return;
   }
   initApp();
 });
 
-/* ---------- ตัวแอปทั้งหมด ---------- */
 function initApp() {
   const words = VOCAB.map(a => ({
     w: a[0], pos: a[1], th: a[2], syn: a[3], ex: a[4], exTh: a[5],
@@ -21,7 +20,7 @@ function initApp() {
 
   /* ---------- localStorage ---------- */
   const load = (k, d) => {
-    try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } 
+    try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; }
     catch (e) { return d; }
   };
   const store = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
@@ -29,7 +28,6 @@ function initApp() {
   let known = load("known", []);
   if (!Array.isArray(known)) known = [];
   known = known.filter(x => typeof x === "string" && words.some(w => w.w === x));
-
   const isKnown = w => known.includes(w);
   const saveKnown = () => store("known", known);
 
@@ -189,72 +187,114 @@ function initApp() {
   };
 
   /* ---------- หาคำต่าง (Family-based) ---------- */
-  
-  // ฟังก์ชันช่วยดึงคำเดี่ยวๆ ออกจาก syn (เช่น "miscarriage (การแท้งลูก)" -> "miscarriage")
+
+  // แปลง syn string → array ของคำเดี่ยว (ตัดวงเล็บ, dedupe case-insensitive)
   function cleanSyn(str) {
-    return str.replace(/\([^)]*\)/g, "").split(",").map(s => s.trim()).filter(Boolean);
+    if (!str) return [];
+    const seen = new Set();
+    const out = [];
+    str.replace(/\([^)]*\)/g, "").split(",").forEach(s => {
+      const orig = s.trim();
+      const k = orig.toLowerCase();
+      if (k && !seen.has(k)) { seen.add(k); out.push(orig); }
+    });
+    return out;
   }
 
   function newOdd() {
-    // 1. สุ่มเลือกคำตั้งต้น (Target)
-    const target = shuffle(words.filter(x => !oddCur || x.w !== oddCur.w))[0];
-    
-    // 2. ดึง Synonym ของ Target มาเป็นตัวลวง (Distractors) 3 คำ
-    const targetSyns = cleanSyn(target.syn);
-    
-    // ถ้า target มี syn ไม่ถึง 3 คำ ให้ fallback ไปใช้วิธีสุ่ม 4 คำจาก pos เดียวกัน
-    if (targetSyns.length < 3) {
-      const pool = shuffle(words);
-      const four = pool.slice(0, 4);
+    // ลองสูงสุด 20 ครั้งเพื่อให้ได้ชุดที่สมบูรณ์
+    for (let attempt = 0; attempt < 20; attempt++) {
+      const candidates = words.filter(x =>
+        cleanSyn(x.syn).length >= 2 &&
+        (!oddCur || x.w !== oddCur.target.w)
+      );
+      if (!candidates.length) break;
+
+      const target = shuffle(candidates)[0];
+      const targetSyns = cleanSyn(target.syn);
+
+      // 2 family words จาก syn ของ target
+      const familyWords = shuffle(targetSyns).slice(0, 2);
+
+      // set คำที่ห้ามซ้ำ (lowercase)
+      const excluded = new Set([
+        target.w.toLowerCase(),
+        ...targetSyns.map(s => s.toLowerCase()),
+        ...familyWords.map(s => s.toLowerCase())
+      ]);
+
+      // หาคำต่างจากคำอื่น
+      let oddWord = null, oddSource = null, oddIsSyn = false;
+      const others = shuffle(words.filter(x => x.w !== target.w));
+
+      for (const o of others) {
+        // ลอง syn ของ o ก่อน (ตรงตามโจทย์)
+        const validSyns = cleanSyn(o.syn).filter(s => !excluded.has(s.toLowerCase()));
+        if (validSyns.length) {
+          oddWord = shuffle(validSyns)[0];
+          oddSource = o;
+          oddIsSyn = true;
+          break;
+        }
+        // ถ้าไม่มี syn ที่ใช้ได้ ลองใช้ตัว o.w เอง
+        if (!excluded.has(o.w.toLowerCase())) {
+          oddWord = o.w;
+          oddSource = o;
+          oddIsSyn = false;
+          break;
+        }
+      }
+
+      if (!oddWord) continue;
+
+      // ประกอบ 4 ตัวเลือก
+      const rawOptions = [
+        { text: target.w,    type: 'target' },
+        { text: familyWords[0], type: 'family' },
+        { text: familyWords[1], type: 'family' },
+        { text: oddWord,      type: 'odd' }
+      ];
+
+      // dedupe (case-insensitive) + ต้องได้ครบ 4
+      const seen = new Set();
+      const options = rawOptions.filter(o => {
+        const k = o.text.toLowerCase();
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+
+      if (options.length !== 4) continue; // ลองใหม่
+
       oddCur = {
-        same: four.slice(0, 3),
-        diff: four[3],
-        isFallback: true
+        target,
+        familyWords,
+        oddWord,
+        oddSource,
+        oddIsSyn,
+        options: shuffle(options),
+        answered: false
       };
       renderOdd();
       return;
     }
 
-    const distractors = shuffle(targetSyns).slice(0, 3);
-    
-    // 3. หาคำแปลกปลอม (Odd one out) ที่ไม่มีความเกี่ยวข้องกับ Target
-    // ใช้วิธีหา synonym ของคำอื่น ที่ไม่ซ้ำกับ targetSyns เลย
-    let oddWord = null;
-    const others = shuffle(words.filter(x => x.w !== target.w));
-    for (const o of others) {
-      const otherSyns = cleanSyn(o.syn);
-      // เช็คว่าไม่มีคำไหนใน otherSyns ไปซ้ำกับ targetSyns หรือตัว Target เอง
-      const overlap = otherSyns.some(s => 
-        targetSyns.includes(s) || 
-        s.toLowerCase() === target.w.toLowerCase() || 
-        targetSyns.some(ts => ts.toLowerCase() === o.w.toLowerCase())
-      );
-      if (!overlap) {
-        // สุ่มเลือก 1 คำจาก syn ของคำอื่น (หรือใช้ตัวคำนั้นเอง)
-        oddWord = otherSyns.length ? shuffle(otherSyns)[0] : o.w;
-        break;
-      }
-    }
-
-    // ถ้าหาไม่ได้ให้ fallback
-    if (!oddWord) {
-       oddWord = "unknown";
-    }
-
-    // 4. ประกอบร่างเป็นตัวเลือก 4 ตัว (สลับที่)
-    const options = shuffle([
-      ...distractors.map(w => ({ text: w, isOdd: false })),
-      { text: oddWord, isOdd: true }
-    ]);
-
-    // เก็บ state ไว้ตอบ
+    // fallback: สุ่ม 4 คำจากคลัง
+    const four = shuffle(words).slice(0, 4);
     oddCur = {
-      target,
-      same: distractors,
-      diff: oddWord,
-      options,
-      isFallback: false,
-      answered: false
+      target: four[0],
+      familyWords: [four[1].w, four[2].w],
+      oddWord: four[3].w,
+      oddSource: four[3],
+      oddIsSyn: false,
+      options: shuffle([
+        { text: four[0].w, type: 'target' },
+        { text: four[1].w, type: 'family' },
+        { text: four[2].w, type: 'family' },
+        { text: four[3].w, type: 'odd' }
+      ]),
+      answered: false,
+      isFallback: true
     };
     renderOdd();
   }
@@ -263,57 +303,67 @@ function initApp() {
   function renderOdd() {
     if (!oddCur) return;
 
-    // แสดงคำถาม
-    let html = `<div class="qtext">คำไหน <b>ไม่เข้าพวก</b> กับคำว่า "${oddCur.target.w}"?</div>`;
-    
-    // ถ้ามีการตอบแล้ว ให้แสดงเฉลยภาษาไทยใต้โจทย์
-    if (oddCur.answered) {
-      html += `<div class="muted" style="text-align:left; padding:0 10px 10px; font-size:.95rem;">
-        <b>เป้าหมาย:</b> ${oddCur.target.w} — ${t(oddCur.target.th)}<br>
-        <b>คำตอบ:</b> ${oddCur.diff} — ${t(oddCur.diffTh || "")}
-      </div>`;
-    }
-
-    // แสดงปุ่มตัวเลือก
-    html += oddCur.options.map(o =>
-      `<button class="opt" data-w="${o.text}" onclick="answerOdd(this, ${o.isOdd})">${o.text}</button>`
-    ).join("");
+    const html =
+      `<div class="qtext">
+         คำไหน <b>ไม่เข้าพวก</b> กับคำว่า
+         <span style="color:var(--accent);">"${oddCur.target.w}"</span>?
+       </div>` +
+      oddCur.options.map(o =>
+        `<button class="opt" data-w="${o.text}" data-type="${o.type}" onclick="answerOdd(this)">${o.text}</button>`
+      ).join("");
 
     $("oddbox").innerHTML = html;
     $("oddScore").textContent = `คะแนน ${oddScore} / ${oddTotal}`;
   }
 
-  window.answerOdd = function (btn, isOdd) {
-    if (oddCur.answered) return; // กันกดซ้ำ
+  window.answerOdd = function (btn) {
+    if (!oddCur || oddCur.answered) return;
     oddCur.answered = true;
 
+    const pickedType = btn.dataset.type;
+    const isCorrect = pickedType === 'odd';
+
     oddTotal++;
-    if (isOdd) oddScore++;
+    if (isCorrect) oddScore++;
 
-    // หาคำแปลไทยของ diff
-    const diffObj = words.find(x => x.w === oddCur.diff) || 
-                    words.find(x => cleanSyn(x.syn).includes(oddCur.diff));
-    oddCur.diffTh = diffObj ? diffObj.th : "";
-
-    // อัปเดต UI เฉลย
     document.querySelectorAll("#oddbox .opt").forEach(b => {
       b.disabled = true;
-      const isThisOdd = b.dataset.w === oddCur.diff;
-      if (isThisOdd) b.classList.add("ok");
+      if (b.dataset.type === 'odd') b.classList.add("ok");
       else if (b === btn) b.classList.add("bad");
     });
 
-    // แทรกข้อความเฉลยภาษาไทย (ภาษาคนอ่านง่าย)
-    const targetTh = oddCur.target.th;
-    const diffTh = oddCur.diffTh;
-    const diffPron = oddCur.diff; // คำอังกฤษ
-    
-    let explanation = `<div class="muted" style="text-align:left; padding:12px 10px; font-size:.95rem; line-height:1.6; background:var(--panel); border-radius:10px; margin-top:10px;">
-      <b>คำตอบ:</b> <span style="color:var(--ok); font-weight:600;">${diffPron}</span> ${diffTh ? `(แปลว่า ${t(diffTh)})` : ""}<br>
-      <span style="font-size:.85rem; color:var(--dim);">
-        ส่วนอีก 3 คำ เป็นคำพ้องความหมาย (synonyms) ของ "${oddCur.target.w}" ซึ่งแปลว่า ${t(targetTh)}
-      </span>
-    </div>`;
+    // สร้างคำอธิบายเฉลย
+    const tgt = oddCur.target;
+    const fam = oddCur.familyWords;
+    const oddW = oddCur.oddWord;
+    const oddSrc = oddCur.oddSource;
+
+    // คำแปลของ oddWord — อ้างอิง context ให้ถูกต้อง
+    let oddExplain;
+    if (oddCur.oddIsSyn) {
+      oddExplain = `<b style="color:var(--txt);">${oddW}</b> — เป็นคำพ้องของ
+        <b>${oddSrc.w}</b> (${t(oddSrc.th)})`;
+    } else {
+      oddExplain = `<b style="color:var(--txt);">${oddW}</b> — แปลว่า ${t(oddSrc.th)}`;
+    }
+
+    const explanation = `
+      <div style="text-align:left; padding:14px 16px; background:var(--panel);
+                  border:1px solid var(--line); border-radius:12px; margin-top:12px;
+                  font-size:.95rem; line-height:1.7;">
+        <div style="color:var(--ok); font-weight:600; margin-bottom:8px;">
+          ✓ คำตอบที่ถูก: ${oddW}
+        </div>
+        <div style="color:var(--dim); font-size:.88rem; margin-bottom:6px;">
+          <b>${tgt.w}</b> ${t(tgt.th)}
+        </div>
+        <div style="color:var(--dim); font-size:.88rem; margin-bottom:8px;">
+          ${fam.join(", ")} เป็นคำพ้องความหมาย (synonyms) ของ <b>${tgt.w}</b>
+        </div>
+        <div style="color:var(--dim); font-size:.88rem;">
+          ส่วน ${oddExplain} → ไม่เข้าพวก
+        </div>
+      </div>`;
 
     $("oddbox").insertAdjacentHTML("beforeend", explanation);
     $("oddbox").insertAdjacentHTML("beforeend",
