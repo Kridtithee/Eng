@@ -2,45 +2,50 @@
 <html lang="th">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
 <title>My Vocab</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
-  <h1>My Vocab</h1>
-  <nav>
-    <button class="tab on" data-t="list" onclick="show('list')">รายการ</button>
-    <button class="tab" data-t="cards" onclick="show('cards')">แฟลชการ์ด</button>
-    <button class="tab" data-t="quiz" onclick="show('quiz')">ควิซ</button>
-  </nav>
-  <div id="opts">
-    <label><input type="checkbox" id="showth" checked onchange="render()"> แสดงคำแปลไทย</label>
-    <label><input type="checkbox" id="hide" onchange="render()"> ซ่อนคำที่จำแล้ว</label>
+  <div class="bar">
+    <h1>My Vocab</h1>
+    <nav>
+      <button class="tab on" data-t="list" onclick="show('list')">รายการ</button>
+      <button class="tab" data-t="cards" onclick="show('cards')">แฟลชการ์ด</button>
+      <button class="tab" data-t="quiz" onclick="show('quiz')">ควิซ</button>
+      <button class="tab" data-t="odd" onclick="show('odd')">หาคำต่าง</button>
+    </nav>
   </div>
 </header>
 
 <main>
   <section id="list">
-    <input id="q" type="search" placeholder="ค้นหา คำ / ความหมาย / synonym..." oninput="render()">
-    <p id="count"></p>
+    <input id="q" type="search" placeholder="ค้นหา คำ / ความหมาย / synonym…" oninput="render()">
+    <p id="count" class="muted"></p>
     <div id="listbox"></div>
   </section>
 
   <section id="cards" hidden>
     <div id="card" onclick="flip(event)"></div>
-    <p id="pos"></p>
+    <p id="pos" class="muted"></p>
     <div class="row">
       <button onclick="move(-1)">◀</button>
-      <button onclick="markCurrent()">✅ จำได้แล้ว</button>
+      <button class="primary" onclick="markCurrent()">จำได้แล้ว</button>
       <button onclick="move(1)">▶</button>
     </div>
-    <div class="row"><button onclick="shuffleDeck()">🔀 สลับลำดับ</button></div>
+    <div class="row"><button class="ghost" onclick="shuffleDeck()">สลับลำดับ</button></div>
   </section>
 
   <section id="quiz" hidden>
-    <p id="score"></p>
+    <p id="score" class="muted"></p>
     <div id="qbox"></div>
+  </section>
+
+  <section id="odd" hidden>
+    <p id="oddScore" class="muted"></p>
+    <div id="oddbox"></div>
   </section>
 </main>
 
